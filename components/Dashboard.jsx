@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { TrendingUp, TrendingDown, Activity, Zap, Brain, Target, Shield, Clock, ArrowRight, Sparkles, AlertCircle, BarChart3, Waves, Rocket, Cpu, Database } from 'lucide-react';
+import { TrendingUp, TrendingDown, Activity, Zap, Brain, Target, Shield, Clock, Sparkles, AlertCircle, BarChart3, Waves, Rocket, Cpu, Database } from 'lucide-react';
+import { fetchPredictions } from '@/lib/api';
 
 export default function UltraModernDashboard() {
   const [tokenAddress, setTokenAddress] = useState('');
@@ -11,8 +12,17 @@ export default function UltraModernDashboard() {
   const [predictions, setPredictions] = useState(null);
   const [error, setError] = useState('');
   const [currentTime, setCurrentTime] = useState('');
+  const [priceData, setPriceData] = useState([]);
 
-  // Fix hydration error - update time only on client
+  // Token name to address mapping
+  const TOKEN_MAP = {
+    'SOL': { address: 'So11111111111111111111111111111111111111112', name: 'Solana', icon: '◎' },
+    'USDC': { address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', name: 'USD Coin', icon: '$' },
+    'BONK': { address: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', name: 'Bonk', icon: '🐕' },
+    'RAY': { address: '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R', name: 'Raydium', icon: '⚡' },
+    'ORCA': { address: 'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE', name: 'Orca', icon: '🐋' },
+  };
+
   useEffect(() => {
     setCurrentTime(new Date().toLocaleTimeString());
     const timer = setInterval(() => {
@@ -21,43 +31,86 @@ export default function UltraModernDashboard() {
     return () => clearInterval(timer);
   }, []);
 
-  // Mock data
-  const priceData = Array.from({ length: 24 }, (_, i) => ({
-    time: `${i}h`,
-    price: 50 + Math.random() * 20 + Math.sin(i / 2) * 10,
-    volume: 50 + Math.random() * 50,
-  }));
+  const resolveTokenAddress = (input) => {
+    const trimmed = input.trim();
+    
+    // If it's already a long address, return as-is
+    if (trimmed.length > 30) {
+      return trimmed;
+    }
+    
+    // Try to match token name
+    const upperInput = trimmed.toUpperCase();
+    if (TOKEN_MAP[upperInput]) {
+      console.log(`✅ Resolved ${upperInput} to address`);
+      return TOKEN_MAP[upperInput].address;
+    }
+    
+    return trimmed;
+  };
 
   const handleAnalyze = async () => {
-    if (!tokenAddress.trim()) {
-      setError('Please enter a token address');
+    const resolvedAddress = resolveTokenAddress(tokenAddress);
+    
+    if (!resolvedAddress) {
+      setError('Please enter a token address or name (e.g., SOL, BONK)');
+      return;
+    }
+    
+    if (resolvedAddress.length < 32) {
+      setError('Invalid token - use full address or known name (SOL, USDC, BONK, RAY, ORCA)');
       return;
     }
     
     setError('');
     setLoading(true);
     
-    // Simulate API call
-    setTimeout(() => {
-      setPredictions({
-        atr_regime: { value: 'High Volatility', confidence: 87.5 },
-        trend_label: { value: 'Bullish', confidence: 82.3 },
-        trend_inversion: { value: 'Unlikely', confidence: 91.2 },
+    try {
+      console.log(`🔍 Analyzing token: ${resolvedAddress.slice(0, 8)}...`);
+      
+      const response = await fetchPredictions(resolvedAddress);
+      
+      console.log('✅ API Response received:', response);
+      
+      setPredictions(response.predictions);
+      
+      setActiveToken({
+        address: resolvedAddress,
+        price: response.current_data.price,
+        change24h: response.current_data.price_change_24h,
+        volume: response.current_data.volume_24h / 1000000,
+        liquidity: response.current_data.liquidity / 1000000,
       });
-      setActiveToken({ 
-        price: 67.89, 
-        change24h: 12.45, 
-        volume: 125.6, 
-        liquidity: 89.2 
-      });
+
+      // Process OHLCV for charts
+      if (response.current_data.ohlcv && response.current_data.ohlcv.length > 0) {
+        const last24Hours = response.current_data.ohlcv.slice(-24);
+        const chartData = last24Hours.map(item => ({
+          time: new Date(item.unixTime * 1000).toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit' 
+          }),
+          price: item.c,
+          volume: item.v / 1000000,
+        }));
+        setPriceData(chartData);
+      }
+
+    } catch (err) {
+      console.error('❌ Error:', err);
+      setError(
+        err.response?.data?.detail || 
+        'Failed to fetch predictions. Make sure backend is running on port 8000.'
+      );
+    } finally {
       setLoading(false);
-    }, 2000);
+    }
   };
 
   const quickTokens = [
-    { name: 'SOL', icon: '◎', gradient: 'from-purple-500 to-violet-600' },
-    { name: 'USDC', icon: '$', gradient: 'from-blue-500 to-cyan-600' },
-    { name: 'BONK', icon: '🐕', gradient: 'from-orange-500 to-red-600' },
+    { name: 'SOL', icon: '◎', gradient: 'from-purple-500 to-violet-600', address: 'So11111111111111111111111111111111111111112' },
+    { name: 'USDC', icon: '$', gradient: 'from-blue-500 to-cyan-600', address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' },
+    { name: 'BONK', icon: '🐕', gradient: 'from-orange-500 to-red-600', address: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263' },
   ];
 
   return (
@@ -137,7 +190,7 @@ export default function UltraModernDashboard() {
             </div>
             <div>
               <h2 className="text-2xl font-bold">Token Analysis</h2>
-              <p className="text-sm text-zinc-400">Enter token address for instant predictions</p>
+              <p className="text-sm text-zinc-400">Enter token name (SOL, BONK) or full address</p>
             </div>
           </div>
 
@@ -147,7 +200,8 @@ export default function UltraModernDashboard() {
                 type="text"
                 value={tokenAddress}
                 onChange={(e) => setTokenAddress(e.target.value)}
-                placeholder="Paste Solana token address..."
+                onKeyPress={(e) => e.key === 'Enter' && handleAnalyze()}
+                placeholder="Type: SOL, USDC, BONK or paste full address..."
                 className="w-full bg-black/50 border border-zinc-800 focus:border-purple-500 rounded-2xl px-6 py-5 pr-32 text-white placeholder-zinc-600 focus:outline-none transition-all"
               />
               <button
@@ -180,7 +234,7 @@ export default function UltraModernDashboard() {
               {quickTokens.map((token) => (
                 <button
                   key={token.name}
-                  onClick={() => setTokenAddress('So11111111111111111111111111111111111111112')}
+                  onClick={() => setTokenAddress(token.name)}
                   className={`px-4 py-2 bg-gradient-to-r ${token.gradient} rounded-xl text-white font-medium hover:scale-105 transition-transform flex items-center gap-2`}
                 >
                   <span className="text-lg">{token.icon}</span>
@@ -195,15 +249,16 @@ export default function UltraModernDashboard() {
         {activeToken && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
             {[
-              { label: 'Price', value: `$${activeToken.price}`, icon: Activity, color: 'purple' },
-              { label: '24h Change', value: `+${activeToken.change24h}%`, icon: TrendingUp, color: 'green' },
-              { label: 'Volume', value: `$${activeToken.volume}M`, icon: BarChart3, color: 'blue' },
-              { label: 'Liquidity', value: `$${activeToken.liquidity}M`, icon: Waves, color: 'pink' },
+              { label: 'Price', value: `$${activeToken.price.toFixed(6)}`, icon: Activity, color: 'purple' },
+              { label: '24h Change', value: `${activeToken.change24h >= 0 ? '+' : ''}${activeToken.change24h.toFixed(2)}%`, icon: activeToken.change24h >= 0 ? TrendingUp : TrendingDown, color: activeToken.change24h >= 0 ? 'green' : 'red' },
+              { label: 'Volume', value: `$${activeToken.volume.toFixed(2)}M`, icon: BarChart3, color: 'blue' },
+              { label: 'Liquidity', value: `$${activeToken.liquidity.toFixed(2)}M`, icon: Waves, color: 'pink' },
             ].map((item, i) => {
               const Icon = item.icon;
               const colorMap = {
                 purple: 'text-purple-400',
                 green: 'text-green-400',
+                red: 'text-red-400',
                 blue: 'text-blue-400',
                 pink: 'text-pink-400',
               };
@@ -243,7 +298,7 @@ export default function UltraModernDashboard() {
                     </div>
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-zinc-500">Confidence</span>
-                      <span className="text-2xl font-bold text-white">{predictions.atr_regime.confidence}%</span>
+                      <span className="text-2xl font-bold text-white">{predictions.atr_regime.confidence.toFixed(1)}%</span>
                     </div>
                     <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
                       <div 
@@ -274,7 +329,7 @@ export default function UltraModernDashboard() {
                     </div>
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-zinc-500">Confidence</span>
-                      <span className="text-2xl font-bold text-white">{predictions.trend_label.confidence}%</span>
+                      <span className="text-2xl font-bold text-white">{predictions.trend_label.confidence.toFixed(1)}%</span>
                     </div>
                     <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
                       <div 
@@ -305,7 +360,7 @@ export default function UltraModernDashboard() {
                     </div>
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-zinc-500">Confidence</span>
-                      <span className="text-2xl font-bold text-white">{predictions.trend_inversion.confidence}%</span>
+                      <span className="text-2xl font-bold text-white">{predictions.trend_inversion.confidence.toFixed(1)}%</span>
                     </div>
                     <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
                       <div 
@@ -319,76 +374,78 @@ export default function UltraModernDashboard() {
             </div>
 
             {/* Charts Section */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-              {/* Price Chart */}
-              <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800 rounded-3xl p-6">
-                <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                  <BarChart3 className="w-5 h-5 text-purple-400" />
-                  Price Action
-                </h3>
-                <ResponsiveContainer width="100%" height={300}>
-                  <AreaChart data={priceData}>
-                    <defs>
-                      <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#a855f7" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-                    <XAxis dataKey="time" stroke="#71717a" />
-                    <YAxis stroke="#71717a" />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: '#18181b', 
-                        border: '1px solid #27272a',
-                        borderRadius: '12px' 
-                      }} 
-                    />
-                    <Area 
-                      type="monotone" 
-                      dataKey="price" 
-                      stroke="#a855f7" 
-                      strokeWidth={2}
-                      fillOpacity={1} 
-                      fill="url(#colorPrice)" 
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+            {priceData.length > 0 && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                {/* Price Chart */}
+                <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800 rounded-3xl p-6">
+                  <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5 text-purple-400" />
+                    Price Action (24h)
+                  </h3>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <AreaChart data={priceData}>
+                      <defs>
+                        <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#a855f7" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                      <XAxis dataKey="time" stroke="#71717a" />
+                      <YAxis stroke="#71717a" />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: '#18181b', 
+                          border: '1px solid #27272a',
+                          borderRadius: '12px' 
+                        }} 
+                      />
+                      <Area 
+                        type="monotone" 
+                        dataKey="price" 
+                        stroke="#a855f7" 
+                        strokeWidth={2}
+                        fillOpacity={1} 
+                        fill="url(#colorPrice)" 
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
 
-              {/* Volume Chart */}
-              <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800 rounded-3xl p-6">
-                <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                  <Activity className="w-5 h-5 text-cyan-400" />
-                  Volume Analysis
-                </h3>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={priceData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-                    <XAxis dataKey="time" stroke="#71717a" />
-                    <YAxis stroke="#71717a" />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: '#18181b', 
-                        border: '1px solid #27272a',
-                        borderRadius: '12px' 
-                      }} 
-                    />
-                    <Bar 
-                      dataKey="volume" 
-                      fill="url(#colorVolume)" 
-                      radius={[8, 8, 0, 0]}
-                    />
-                    <defs>
-                      <linearGradient id="colorVolume" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.8}/>
-                        <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.2}/>
-                      </linearGradient>
-                    </defs>
-                  </BarChart>
-                </ResponsiveContainer>
+                {/* Volume Chart */}
+                <div className="bg-zinc-900/50 backdrop-blur-xl border border-zinc-800 rounded-3xl p-6">
+                  <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                    <Activity className="w-5 h-5 text-cyan-400" />
+                    Volume Analysis (24h)
+                  </h3>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={priceData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                      <XAxis dataKey="time" stroke="#71717a" />
+                      <YAxis stroke="#71717a" />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: '#18181b', 
+                          border: '1px solid #27272a',
+                          borderRadius: '12px' 
+                        }} 
+                      />
+                      <Bar 
+                        dataKey="volume" 
+                        fill="url(#colorVolume)" 
+                        radius={[8, 8, 0, 0]}
+                      />
+                      <defs>
+                        <linearGradient id="colorVolume" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.8}/>
+                          <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.2}/>
+                        </linearGradient>
+                      </defs>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
-            </div>
+            )}
           </>
         )}
 
